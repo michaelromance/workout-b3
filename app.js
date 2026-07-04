@@ -944,13 +944,24 @@ const sky = (() => {
   function lerp(a, b, k) { return a + (b - a) * k; }
   function mix(c1, c2, k) { return `rgb(${Math.round(lerp(c1[0], c2[0], k))},${Math.round(lerp(c1[1], c2[1], k))},${Math.round(lerp(c1[2], c2[2], k))})`; }
 
+  let lastW = 0, resizeT = null, scrolling = false, scrollT = null;
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth; H = window.innerHeight;
+    const newW = window.innerWidth;
+    // iOS Safari fires resize constantly while scrolling (toolbar collapse).
+    // Oversize the canvas to the largest height we've seen so height-only
+    // changes never rebuild anything: no repaint jump, no cloud reshuffle.
+    W = newW; H = Math.max(H, window.innerHeight, (screen && screen.height) || 0);
     cv.width = W * dpr; cv.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    makeBlobs();
+    if (newW !== lastW || !blobs.length) { lastW = newW; makeBlobs(); } // width change = rotation/new device only
     draw();
+  }
+  function onResize() { clearTimeout(resizeT); resizeT = setTimeout(resize, 120); }
+  function markScrolling() {
+    scrolling = true;
+    clearTimeout(scrollT);
+    scrollT = setTimeout(() => { scrolling = false; }, 220);
   }
   function makeBlobs() {
     blobs = [];
@@ -1009,16 +1020,17 @@ const sky = (() => {
     else draw(); // static frame (focus mode gets a calm, frozen sky)
   }
   function poke(x, y) {
-    if (!running()) return;
+    if (!running() || scrolling) return; // a scroll is not a caress
     for (const b of blobs) {
       const dx = b.x - x, dy = b.y - y, d = Math.hypot(dx, dy);
       if (d < b.r * 1.6 && d > 1) {
-        const f = (1 - d / (b.r * 1.6)) * 1.6;
+        const f = (1 - d / (b.r * 1.6)) * 1.1;
         b.ix += (dx / d) * f; b.iy += (dy / d) * f;
       }
     }
   }
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", onResize);
+  window.addEventListener("scroll", markScrolling, { passive: true });
   document.addEventListener("visibilitychange", update);
   window.addEventListener("pointermove", e => poke(e.clientX, e.clientY), { passive: true });
   window.addEventListener("touchmove", e => { const c = e.touches[0]; if (c) poke(c.clientX, c.clientY); }, { passive: true });
